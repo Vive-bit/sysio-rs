@@ -25,12 +25,13 @@ const SPI_IOC_WR_BITS_PER_WORD: c_ulong = _ioc(IOC_WRITE, SPI_IOC_MAGIC, 3, std:
 const SPI_IOC_WR_MAX_SPEED_HZ: c_ulong = _ioc(IOC_WRITE, SPI_IOC_MAGIC, 4, std::mem::size_of::<u32>() as u32) as c_ulong;
 
 static mut PIN_MODE: Option<Mode> = None;
-static BOARD_TO_BCM: [i32; 41] = [
-    -1,  2, -1,  3,  4, -1,  0,  1,
-    14, -1, 15, 17, 18, 27, -1, 22,
-    23, -1, 24, 10,  9, 25, 11,  8,
-    -1,  7,  0,  1,  5, -1,  6, 12,
-    13, -1, 19, 16, 26, 20, -1, 21
+static BOARD_TO_BCM: [i32; 40] = [
+    2, -1,  3,  4, -1,  0,  1, // 1-7
+   14, -1, 15, 17, 18, 27, -1, // 8-14
+   22, 23, -1, 24, 10,  9, 25,  // 15-21
+   11,  8, -1,  7,  0,  1,  5,  // 22-28
+   -1,  6, 12, 13, -1, 19, 16,  // 29-35
+   26, 20, -1, 21             // 36-40
 ];
 
 enum Mode { BCM, BOARD }
@@ -63,6 +64,15 @@ fn write_sysfs(path: &str, value: &str) -> std::io::Result<()> {
 
 fn export_pin(pin: u8) -> PyResult<()> {
     let dir = format!("/sys/class/gpio/gpio{}", pin);
+    if std::path::Path::new(&dir).exists() {
+        return Ok(());
+    }
+    match write_sysfs("/sys/class/gpio/export", &pin.to_string()) {
+        Ok(_) => Ok(()),
+        Err(e) if matches!(e.raw_os_error(), Some(libc::EBUSY) | Some(libc::EINVAL)) => Ok(()),
+        Err(e) => Err(PyOSError::new_err(e.to_string())),
+    }
+}", pin);
     if std::path::Path::new(&dir).exists() {
         return Ok(());
     }
