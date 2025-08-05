@@ -102,7 +102,7 @@ struct SpiIocTransfer {
     cs_change: u8,
     pad: u32,
 }
-fn _ioc(dir: u32, type_: u8, nr: u8, size: u32) -> u64 {
+const fn _ioc(dir: u32, type_: u8, nr: u8, size: u32) -> u64 {
     const IOC_NRSHIFT: u32 = 0;
     const IOC_TYPESHIFT: u32 = IOC_NRSHIFT + 8;
     const IOC_SIZESHIFT: u32 = IOC_TYPESHIFT + 8;
