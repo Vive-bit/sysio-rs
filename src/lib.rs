@@ -169,6 +169,12 @@ impl MCP3008 {
         Ok((((rx[1] & 3) as u16) << 8) | rx[2] as u16)
     }
 
+    #[getter]
+    fn raw_value(&self) -> PyResult<u16> {
+        self.read_raw()
+    }
+
+    #[getter]
     fn value(&self) -> PyResult<f64> {
         Ok(self.read_raw()? as f64 / 1023.0)
     }
@@ -176,6 +182,11 @@ impl MCP3008 {
     fn read(&self) -> PyResult<(u16, f64)> {
         let r = self.read_raw()?;
         Ok((r, r as f64 / 1023.0))
+    }
+
+    fn value(&self) -> PyResult<f64> {
+        // old!
+        self.value()
     }
 }
 
