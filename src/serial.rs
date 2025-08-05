@@ -16,6 +16,7 @@ use crate::gpio::{setup, output};
 
 use pyo3::{prelude::*, FromPyObject, exceptions::PyValueError};
 
+#[pyclass]
 #[derive(Debug, Clone, Copy)]
 pub enum DataBits {
     Five  = 5,
@@ -24,19 +25,16 @@ pub enum DataBits {
     Eight = 8,
 }
 
-impl<'source> FromPyObject<'source> for DataBits {
-    fn extract(obj: &'source PyAny) -> PyResult<Self> {
-        let v: u8 = obj.extract()?;
-        match v {
-            5  => Ok(DataBits::Five),
-            6  => Ok(DataBits::Six),
-            7  => Ok(DataBits::Seven),
-            8  => Ok(DataBits::Eight),
-            _  => Err(PyValueError::new_err("data_bits must be 5,6,7 or 8")),
-        }
-    }
+#[pymethods]
+impl DataBits {
+    #[classattr] pub const FIVE:  DataBits = DataBits::Five;
+    #[classattr] pub const SIX:   DataBits = DataBits::Six;
+    #[classattr] pub const SEVEN: DataBits = DataBits::Seven;
+    #[classattr] pub const EIGHT: DataBits = DataBits::Eight;
 }
 
+// PARITY
+#[pyclass]
 #[derive(Debug, Clone, Copy)]
 pub enum Parity {
     N, // None
@@ -44,43 +42,25 @@ pub enum Parity {
     O, // Odd
 }
 
-impl<'source> FromPyObject<'source> for Parity {
-    fn extract(obj: &'source PyAny) -> PyResult<Self> {
-        // Entweder als String oder als Int übergeben:
-        if let Ok(s) = obj.extract::<&str>() {
-            match s {
-                "N"|"n" => Ok(Parity::N),
-                "E"|"e" => Ok(Parity::E),
-                "O"|"o" => Ok(Parity::O),
-                _       => Err(PyValueError::new_err("parity must be 'N', 'E' or 'O'")),
-            }
-        } else {
-            let v: u8 = obj.extract()?;
-            match v {
-                0 => Ok(Parity::N),
-                1 => Ok(Parity::E),
-                2 => Ok(Parity::O),
-                _ => Err(PyValueError::new_err("parity must be 0 (N),1 (E) or 2 (O)")),
-            }
-        }
-    }
+#[pymethods]
+impl Parity {
+    #[classattr] pub const N: Parity = Parity::N;
+    #[classattr] pub const E: Parity = Parity::E;
+    #[classattr] pub const O: Parity = Parity::O;
 }
 
+// STOP BITS
+#[pyclass]
 #[derive(Debug, Clone, Copy)]
 pub enum StopBits {
     One = 1,
     Two = 2,
 }
 
-impl<'source> FromPyObject<'source> for StopBits {
-    fn extract(obj: &'source PyAny) -> PyResult<Self> {
-        let v: u8 = obj.extract()?;
-        match v {
-            1 => Ok(StopBits::One),
-            2 => Ok(StopBits::Two),
-            _ => Err(PyValueError::new_err("stop_bits must be 1 or 2")),
-        }
-    }
+#[pymethods]
+impl StopBits {
+    #[classattr] pub const ONE: StopBits = StopBits::One;
+    #[classattr] pub const TWO: StopBits = StopBits::Two;
 }
 
 
