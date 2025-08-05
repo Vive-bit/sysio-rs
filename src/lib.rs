@@ -5,10 +5,9 @@ use std::io::{Read, Write};
 use std::os::raw::c_ulong;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::thread::sleep;
-use std::time::Duration;
 
 static mut PIN_MODE: Option<Mode> = None;
-static BOARD_TO_BCM: [i32; 41] = [
+static BOARD_TO_BCM: [i32; 40] = [
     -1, -1, -1, 2, -1, 3, 4, //  1–7
     -1, 14, -1, 15, 17, 18, 27, //  8–14
     -1, 22, 23, -1, 24, 10, 9,  // 15–21
