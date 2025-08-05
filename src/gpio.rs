@@ -1,28 +1,38 @@
 use pyo3::prelude::*;
 use pyo3::exceptions::PyOSError;
 use std::ptr;
-use libc::{ open, mmap, close, PROT_READ, PROT_WRITE, MAP_SHARED, O_RDWR, c_char };
-use std::sync::{OnceLock, Mutex};
+use std::sync::{Mutex, OnceLock};
+use libc::{open, mmap, close, PROT_READ, PROT_WRITE, MAP_SHARED, O_RDWR, c_char};
 
 const GPIO_LEN: usize = 0xB4;
-static GPIO_MEM: OnceLock<Mutex<*mut u32>> = OnceLock::new();
+// store pointer as usize
+static GPIO_MEM: OnceLock<Mutex<usize>> = OnceLock::new();
 
 fn init_gpio() -> PyResult<*mut u32> {
-    let lock = GPIO_MEM.get_or_init(|| Mutex::new(ptr::null_mut()));
+    let lock = GPIO_MEM.get_or_init(|| Mutex::new(0));
     let mut guard = lock.lock().unwrap();
-    if guard.is_null() {
+    if *guard == 0 {
         let fd = unsafe { open(b"/dev/gpiomem\0".as_ptr() as *const c_char, O_RDWR) };
         if fd < 0 {
             return Err(PyOSError::new_err("Failed to open /dev/gpiomem"));
         }
-        let map = unsafe { mmap(ptr::null_mut(), GPIO_LEN, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0) };
+        let map = unsafe {
+            mmap(
+                ptr::null_mut(),
+                GPIO_LEN,
+                PROT_READ | PROT_WRITE,
+                MAP_SHARED,
+                fd,
+                0,
+            )
+        };
         unsafe { close(fd) };
         if map == libc::MAP_FAILED {
             return Err(PyOSError::new_err("GPIO mmap failed"));
         }
-        *guard = map as *mut u32;
+        *guard = map as usize;
     }
-    Ok(*guard)
+    Ok((*guard as *mut u32))
 }
 
 fn gpio_reg(base: *mut u32, idx: usize) -> *mut u32 {

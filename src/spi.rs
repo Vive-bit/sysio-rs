@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::exceptions::PyOSError;
 use std::ffi::CString;
-use libc::{ open, ioctl, O_RDWR, c_int, c_char };
+use libc::{open, ioctl, O_RDWR, c_int};
 
 #[repr(C)]
 pub struct SpiTr {
@@ -87,17 +87,14 @@ impl MCP3008 {
     pub fn raw_value(&self) -> PyResult<u16> {
         self.read_raw()
     }
-
     #[getter]
     pub fn value(&self) -> PyResult<f64> {
         Ok(self.read_raw()? as f64 / 1023.0)
     }
-
     #[getter]
     pub fn bits(&self) -> PyResult<u8> {
         Ok(10)
     }
-
     pub fn read(&self) -> PyResult<(u16, f64)> {
         let r = self.read_raw()?;
         Ok((r, r as f64 / 1023.0))
