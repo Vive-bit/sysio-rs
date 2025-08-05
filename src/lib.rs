@@ -76,6 +76,17 @@ fn output(pin: u8, value: u8) -> PyResult<()> {
     Ok(())
 }
 
+#[pymethods]
+impl MCP3008 {
+    /// Read raw 10-bit value *and* normalized value in one call
+    fn read(&self) -> PyResult<(u16, f64)> {
+        let raw = self.read_raw()?;
+        let norm = raw as f64 / 1023.0;
+        Ok((raw, norm))
+    }
+}
+
+
 #[pyfunction]
 fn input(pin: u8) -> PyResult<u8> {
     init_gpio()?;
@@ -93,5 +104,6 @@ fn sysio(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(setup, m)?)?;
     m.add_function(wrap_pyfunction!(output, m)?)?;
     m.add_function(wrap_pyfunction!(input, m)?)?;
+    m.add_class::<MCP3008>()?;
     Ok(())
 }
