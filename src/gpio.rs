@@ -4,9 +4,20 @@ use std::ptr;
 use std::sync::{Mutex, OnceLock};
 use libc::{open, mmap, close, PROT_READ, PROT_WRITE, MAP_SHARED, O_RDWR, c_char};
 
-const GPIO_LEN: usize = 0xB4;
-// store pointer as usize
+#[derive(Copy, Clone)]
+enum Mode { BCM, BOARD }
+
+static PIN_MODE: OnceLock<Mutex<Mode>> = OnceLock::new();
 static GPIO_MEM: OnceLock<Mutex<usize>> = OnceLock::new();
+
+const GPIO_LEN: usize = 0xB4;
+const BOARD_TO_BCM: [i8; 41] = [
+    -1, -1, -1,  2, -1,  3, -1,  4, 14, -1,
+    15, 17, 18, 27, -1, 22, 23, -1, 24, 10,
+    -1, 9, 25, 11, 8, -1,  7, -1, -1, 5,
+    -1, 6, 12, 13, -1, 19, 16, 26, 20, -1,
+    21,
+];
 
 fn init_gpio() -> PyResult<*mut u32> {
     let lock = GPIO_MEM.get_or_init(|| Mutex::new(0));
@@ -35,21 +46,53 @@ fn init_gpio() -> PyResult<*mut u32> {
     Ok((*guard as *mut u32))
 }
 
+fn get_mode() -> Mode {
+    *PIN_MODE
+        .get_or_init(|| Mutex::new(Mode::BCM))
+        .lock()
+        .unwrap()
+}
+
+fn map_pin(pin: u8) -> PyResult<u8> {
+    match get_mode() {
+        Mode::BCM => Ok(pin),
+        Mode::BOARD => {
+            let idx = pin as usize;
+            if idx == 0 || idx > 40 {
+                return Err(PyOSError::new_err("Board pin out of range 1–40"));
+            }
+            let bcm = BOARD_TO_BCM[idx];
+            if bcm < 0 {
+                return Err(PyOSError::new_err("Board pin is not a GPIO"));
+            }
+            Ok(bcm as u8)
+        }
+    }
+}
+
 fn gpio_reg(base: *mut u32, idx: usize) -> *mut u32 {
     unsafe { base.add(idx) }
 }
 
 #[pyfunction]
-pub fn setmode(_mode: &str) -> PyResult<()> {
+pub fn setmode(mode: &str) -> PyResult<()> {
+    let m = match mode {
+        "BCM"   => Mode::BCM,
+        "BOARD" => Mode::BOARD,
+        _       => return Err(PyOSError::new_err("Mode must be \"BCM\" or \"BOARD\"")),
+    };
+    let lock = PIN_MODE.get_or_init(|| Mutex::new(Mode::BCM));
+    *lock.lock().unwrap() = m;
     init_gpio()?;
     Ok(())
 }
 
 #[pyfunction]
 pub fn setup(pin: u8, direction: &str) -> PyResult<()> {
+    let bcm = map_pin(pin)?;
     let base = init_gpio()?;
-    let fsel = (pin as usize) / 10;
-    let shift = ((pin % 10) * 3) as usize;
+    let fsel = (bcm as usize) / 10;
+    let shift = ((bcm % 10) * 3) as usize;
     unsafe {
         let reg = gpio_reg(base, fsel);
         let val = ptr::read_volatile(reg);
@@ -62,9 +105,14 @@ pub fn setup(pin: u8, direction: &str) -> PyResult<()> {
 
 #[pyfunction]
 pub fn output(pin: u8, value: u8) -> PyResult<()> {
+    let bcm = map_pin(pin)?;
     let base = init_gpio()?;
-    let idx = if value == 0 { 10 + (pin as usize) / 32 } else { 7 + (pin as usize) / 32 };
-    let shift = (pin % 32) as usize;
+    let idx = if value == 0 {
+        10 + (bcm as usize) / 32
+    } else {
+        7 + (bcm as usize) / 32
+    };
+    let shift = (bcm % 32) as usize;
     unsafe {
         let reg = gpio_reg(base, idx);
         ptr::write_volatile(reg, 1 << shift);
@@ -74,9 +122,10 @@ pub fn output(pin: u8, value: u8) -> PyResult<()> {
 
 #[pyfunction]
 pub fn input(pin: u8) -> PyResult<u8> {
+    let bcm = map_pin(pin)?;
     let base = init_gpio()?;
-    let idx = 13 + (pin as usize) / 32;
-    let shift = (pin % 32) as usize;
+    let idx = 13 + (bcm as usize) / 32;
+    let shift = (bcm % 32) as usize;
     let val = unsafe { ptr::read_volatile(gpio_reg(base, idx)) };
     Ok(((val >> shift) & 1) as u8)
 }

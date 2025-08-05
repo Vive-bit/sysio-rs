@@ -20,7 +20,9 @@ fn sysio(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<serial::Serial485>()?;
     
     // Timing helpers
+    m.add_function(wrap_pyfunction!(time::sleep_s, m)?)?;
     m.add_function(wrap_pyfunction!(time::sleep_ms, m)?)?;
     m.add_function(wrap_pyfunction!(time::sleep_us, m)?)?;
+    m.add_function(wrap_pyfunction!(time::time_time, m)?)?;
     Ok(())
 }

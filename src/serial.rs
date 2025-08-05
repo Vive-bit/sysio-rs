@@ -116,3 +116,11 @@ impl Serial485 {
         let _ = unsafe { libc::close(*fd) };
     }
 }
+
+impl Drop for Serial485 {
+    fn drop(&mut self) {
+        if let Ok(fd) = self.fd.get_mut() {
+            unsafe { libc::close(*fd); }
+        }
+    }
+}
