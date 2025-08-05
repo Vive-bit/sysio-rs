@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::exceptions::PyOSError;
 use std::ptr;
-use libc::{open, mmap, close, O_RDWR, PROT_READ, PROT_WRITE, MAP_SHARED};
+use libc::{open, mmap, close, O_RDWR, PROT_READ, PROT_WRITE, MAP_SHARED, c_char};
 
 const GPIO_LEN: usize = 0xB4;
 
@@ -13,7 +13,7 @@ fn init_gpio() -> PyResult<()> {
             return Ok(());
         }
         // open /dev/gpiomem
-        let fd = open(b"/dev/gpiomem\0".as_ptr() as *const u8, O_RDWR);
+        let fd = open(b"/dev/gpiomem\0".as_ptr() as *const c_char, O_RDWR);
         if fd < 0 {
             return Err(PyOSError::new_err("Failed to open /dev/gpiomem"));
         }
