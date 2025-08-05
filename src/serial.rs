@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use pyo3::exceptions::PyOSError;
+use pyo3::exceptions::{PyOSError, PyValueError};
 use pyo3::FromPyObject;
 use std::ffi::CString;
 use std::sync::Mutex;
@@ -14,8 +14,7 @@ use libc::{
 };
 use crate::gpio::{setup, output};
 
-use pyo3::{prelude::*, FromPyObject, exceptions::PyValueError};
-
+/// DATA BITS
 #[pyclass]
 #[derive(Debug, Clone, Copy)]
 pub enum DataBits {
@@ -33,7 +32,20 @@ impl DataBits {
     #[classattr] pub const EIGHT: DataBits = DataBits::Eight;
 }
 
-// PARITY
+impl<'source> FromPyObject<'source> for DataBits {
+    fn extract(obj: &'source PyAny) -> PyResult<Self> {
+        let v: u8 = obj.extract()?;
+        match v {
+            5 => Ok(DataBits::Five),
+            6 => Ok(DataBits::Six),
+            7 => Ok(DataBits::Seven),
+            8 => Ok(DataBits::Eight),
+            _ => Err(PyValueError::new_err("data_bits must be 5, 6, 7 or 8")),
+        }
+    }
+}
+
+/// PARITY
 #[pyclass]
 #[derive(Debug, Clone, Copy)]
 pub enum Parity {
@@ -49,7 +61,27 @@ impl Parity {
     #[classattr] pub const O: Parity = Parity::O;
 }
 
-// STOP BITS
+impl<'source> FromPyObject<'source> for Parity {
+    fn extract(obj: &'source PyAny) -> PyResult<Self> {
+        if let Ok(s) = obj.extract::<&str>() {
+            return match s {
+                "N"|"n" => Ok(Parity::N),
+                "E"|"e" => Ok(Parity::E),
+                "O"|"o" => Ok(Parity::O),
+                _ => Err(PyValueError::new_err("parity must be 'N','E' or 'O'")),
+            };
+        }
+        let v: u8 = obj.extract()?;
+        match v {
+            0 => Ok(Parity::N),
+            1 => Ok(Parity::E),
+            2 => Ok(Parity::O),
+            _ => Err(PyValueError::new_err("parity must be 0,1 or 2")),
+        }
+    }
+}
+
+/// STOP BITS
 #[pyclass]
 #[derive(Debug, Clone, Copy)]
 pub enum StopBits {
@@ -63,6 +95,16 @@ impl StopBits {
     #[classattr] pub const TWO: StopBits = StopBits::Two;
 }
 
+impl<'source> FromPyObject<'source> for StopBits {
+    fn extract(obj: &'source PyAny) -> PyResult<Self> {
+        let v: u8 = obj.extract()?;
+        match v {
+            1 => Ok(StopBits::One),
+            2 => Ok(StopBits::Two),
+            _ => Err(PyValueError::new_err("stop_bits must be 1 or 2")),
+        }
+    }
+}
 
 fn config_serial(
     fd: c_int,
