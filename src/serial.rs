@@ -110,7 +110,15 @@ impl Serial485 {
         Ok(())
     }
 
-    // drop to close fd
+    pub fn close(&mut self) -> PyResult<()> {
+        let mut fd_guard = self.fd.lock().unwrap();
+        if *fd_guard >= 0 {
+            unsafe { libc::close(*fd_guard) };
+            *fd_guard = -1; 
+        }
+        Ok(())
+    }
+            
     fn __del__(&mut self) {
         let fd = self.fd.get_mut().unwrap();
         let _ = unsafe { libc::close(*fd) };
