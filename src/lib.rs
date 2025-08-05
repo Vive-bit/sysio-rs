@@ -10,7 +10,7 @@ use libc::{
     termios, tcgetattr, tcsetattr, cfmakeraw,
     cfsetispeed, cfsetospeed, tcdrain, tcflush,
     B9600, B38400, B115200, TCSANOW, VMIN, VTIME, FIONREAD,
-    TCIFLUSH, TCOFLUSH,
+    TCIFLUSH, TCOFLUSH, EAGAIN, EWOULDBLOCK
 };
 
 const GPIO_LEN: usize = 0xB4;
@@ -235,15 +235,18 @@ impl Serial485 {
         Ok(Serial485 { fd, de_pin })
     }
 
-    fn write(&self, data: &[u8]) -> PyResult<usize> {
-        output(self.de_pin, 1)?;
-        let n = unsafe { write(self.fd, data.as_ptr() as *const _, data.len()) };
+    fn read(&self, size: usize) -> PyResult<Vec<u8>> {
+        let mut buf = vec![0u8; size];
+        let n = unsafe { read(self.fd, buf.as_mut_ptr() as *mut _, size) };
         if n < 0 {
-            return Err(PyOSError::new_err("Serial write failed"));
+            let err = unsafe { *libc::__errno_location() };
+            if err == EAGAIN || err == EWOULDBLOCK {
+                return Ok(Vec::new());
+            }
+            return Err(PyOSError::new_err("Serial read failed"));
         }
-        unsafe { tcdrain(self.fd); }
-        output(self.de_pin, 0)?;
-        Ok(n as usize)
+        buf.truncate(n as usize);
+        Ok(buf)
     }
 
     fn read(&self, size: usize) -> PyResult<Vec<u8>> {
