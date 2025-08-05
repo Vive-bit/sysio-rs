@@ -1,14 +1,18 @@
 use pyo3::prelude::*;
 use pyo3::exceptions::PyOSError;
 use std::ffi::CString;
-use libc::{ open, ioctl, c_int, c_char };
-// SpiTr, ioc(), SPI_MAGIC, SPI_WR_* consts...
+use libc::{ open, ioctl, O_RDWR, c_int, c_char };
 
 #[repr(C)]
-struct SpiTr {
-    tx_buf: u64, rx_buf: u64, len: u32,
-    speed_hz: u32, delay_us: u16,
-    bits_per_word: u8, cs_change: u8, pad: u32,
+pub struct SpiTr {
+    pub tx_buf: u64,
+    pub rx_buf: u64,
+    pub len: u32,
+    pub speed_hz: u32,
+    pub delay_us: u16,
+    pub bits_per_word: u8,
+    pub cs_change: u8,
+    pub pad: u32,
 }
 
 const SPI_MAGIC: u8 = b'k';
@@ -23,14 +27,13 @@ const SPI_WR_MODE:  u64 = ioc(1, SPI_MAGIC, 1, std::mem::size_of::<u8>()  as u32
 const SPI_WR_BITS:  u64 = ioc(1, SPI_MAGIC, 3, std::mem::size_of::<u8>()  as u32);
 const SPI_WR_SPEED: u64 = ioc(1, SPI_MAGIC, 4, std::mem::size_of::<u32>() as u32);
 
-
 #[pyclass]
-struct MCP3008 { fd: c_int, channel: u8 }
+pub struct MCP3008 { fd: c_int, channel: u8 }
 
 #[pymethods]
 impl MCP3008 {
     #[new]
-    fn new(bus: u8, cs: u8, channel: u8, speed_khz: u32) -> PyResult<Self> {
+    pub fn new(bus: u8, cs: u8, channel: u8, speed_khz: u32) -> PyResult<Self> {
         let dev = format!("/dev/spidev{}.{}", bus, cs);
         let cdev = CString::new(dev).unwrap();
         let fd = unsafe { open(cdev.as_ptr(), O_RDWR) };
@@ -39,25 +42,25 @@ impl MCP3008 {
         }
         unsafe {
             let m: u8 = 0;
-            if libc::ioctl(fd, crate::SPI_WR_MODE as _, &m) < 0 {
+            if ioctl(fd, SPI_WR_MODE as _, &m) < 0 {
                 return Err(PyOSError::new_err("SPI mode set failed"));
             }
             let b: u8 = 8;
-            if libc::ioctl(fd, crate::SPI_WR_BITS as _, &b) < 0 {
+            if ioctl(fd, SPI_WR_BITS as _, &b) < 0 {
                 return Err(PyOSError::new_err("SPI bits set failed"));
             }
             let s = speed_khz * 1_000;
-            if libc::ioctl(fd, crate::SPI_WR_SPEED as _, &s) < 0 {
+            if ioctl(fd, SPI_WR_SPEED as _, &s) < 0 {
                 return Err(PyOSError::new_err("SPI speed set failed"));
             }
         }
         Ok(MCP3008 { fd, channel })
     }
 
-    fn read_raw(&self) -> PyResult<u16> {
+    pub fn read_raw(&self) -> PyResult<u16> {
         let tx = [1, ((8 | self.channel) << 4) as u8, 0];
         let mut rx = [0u8; 3];
-        let mut tr = crate::SpiTr {
+        let mut tr = SpiTr {
             tx_buf: tx.as_ptr() as u64,
             rx_buf: rx.as_mut_ptr() as u64,
             len:    3,
@@ -68,9 +71,9 @@ impl MCP3008 {
             pad: 0,
         };
         let ret = unsafe {
-            libc::ioctl(
+            ioctl(
                 self.fd,
-                crate::ioc(1, crate::SPI_MAGIC, 0, std::mem::size_of::<crate::SpiTr>() as u32) as _,
+                ioc(1, SPI_MAGIC, 0, std::mem::size_of::<SpiTr>() as u32) as _,
                 &mut tr,
             )
         };
@@ -81,27 +84,22 @@ impl MCP3008 {
     }
 
     #[getter]
-    fn raw_value(&self) -> PyResult<u16> {
+    pub fn raw_value(&self) -> PyResult<u16> {
         self.read_raw()
     }
 
     #[getter]
-    fn value(&self) -> PyResult<f64> {
+    pub fn value(&self) -> PyResult<f64> {
         Ok(self.read_raw()? as f64 / 1023.0)
     }
 
     #[getter]
-    fn bits(&self) -> PyResult<u8> {
+    pub fn bits(&self) -> PyResult<u8> {
         Ok(10)
     }
 
-    fn read(&self) -> PyResult<(u16, f64)> {
+    pub fn read(&self) -> PyResult<(u16, f64)> {
         let r = self.read_raw()?;
         Ok((r, r as f64 / 1023.0))
-    }
-
-    fn value(&self) -> PyResult<f64> {
-        // old!
-        self.value()
     }
 }
