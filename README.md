@@ -27,6 +27,7 @@ Currently used for super performance critical components of my py projects.
   - .flush()
   - .reset_input_buffer()
   - .reset_output_buffer()
+  - .close()
 
 ## Utility
 
