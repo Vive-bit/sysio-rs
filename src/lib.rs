@@ -179,6 +179,11 @@ impl MCP3008 {
         Ok(self.read_raw()? as f64 / 1023.0)
     }
 
+    #[getter] 
+    fn bits(&self) -> PyResult<u8> { 
+        Ok(10)
+    }
+
     fn read(&self) -> PyResult<(u16, f64)> {
         let r = self.read_raw()?;
         Ok((r, r as f64 / 1023.0))
