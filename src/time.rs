@@ -2,6 +2,7 @@ use pyo3::prelude::*;
 use std::thread::sleep;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
+use pyo3::exceptions::PyOSError;
 
 #[pyfunction]
 /// Sleeps for given seconds
