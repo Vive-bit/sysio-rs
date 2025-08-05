@@ -291,7 +291,7 @@ impl Serial485 {
 }
 
 #[pymodule]
-fn rustgpio(_py: Python, m: &PyModule) -> PyResult<()> {
+fn sysio(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(setmode, m)?)?;
     m.add_function(wrap_pyfunction!(setup, m)?)?;
     m.add_function(wrap_pyfunction!(output, m)?)?;
