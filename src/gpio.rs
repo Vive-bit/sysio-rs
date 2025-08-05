@@ -43,7 +43,7 @@ fn init_gpio() -> PyResult<*mut u32> {
         }
         *guard = map as usize;
     }
-    Ok((*guard as *mut u32))
+    Ok(*guard as *mut u32)
 }
 
 fn get_mode() -> Mode {
