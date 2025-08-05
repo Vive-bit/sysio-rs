@@ -18,6 +18,11 @@ fn sysio(_py: Python, m: &PyModule) -> PyResult<()> {
 
     // Serial RS-485
     m.add_class::<serial::Serial485>()?;
+
+    m.add_class::<serial::DataBits>()?;
+    m.add_class::<serial::Parity>()?;
+    m.add_class::<serial::StopBits>()?;
+    m.add_class::<serial::Serial485>()?;
     
     // Timing helpers
     m.add_function(wrap_pyfunction!(time::sleep_s, m)?)?;
