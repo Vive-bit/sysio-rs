@@ -1,8 +1,6 @@
 use pyo3::prelude::*;
 use pyo3::exceptions::PyOSError;
 use std::{ptr, ffi::CString};
-use std::os::unix::io::AsRawFd;
-use std::fs::OpenOptions;
 use libc::{
     open, mmap, close, read, write, ioctl,
     O_RDWR, O_NOCTTY, O_NONBLOCK,
@@ -10,7 +8,7 @@ use libc::{
     termios, tcgetattr, tcsetattr, cfmakeraw,
     cfsetispeed, cfsetospeed, tcdrain, tcflush,
     B9600, B38400, B115200, TCSANOW, VMIN, VTIME, FIONREAD,
-    TCIFLUSH, TCOFLUSH, EAGAIN, EWOULDBLOCK
+    TCIFLUSH, TCOFLUSH, EAGAIN, EWOULDBLOCK,
 };
 
 const GPIO_LEN: usize = 0xB4;
@@ -94,18 +92,13 @@ fn input(pin: u8) -> PyResult<u8> {
     }
 }
 
-// MCP3008 ADC
+// === MCP3008 ===
 
 #[repr(C)]
 struct SpiTr {
-    tx_buf:       u64,
-    rx_buf:       u64,
-    len:          u32,
-    speed_hz:     u32,
-    delay_us:     u16,
-    bits_per_word:u8,
-    cs_change:    u8,
-    pad:          u32,
+    tx_buf: u64, rx_buf: u64, len: u32,
+    speed_hz: u32, delay_us: u16,
+    bits_per_word: u8, cs_change: u8, pad: u32,
 }
 
 const SPI_MAGIC: u8 = b'k';
@@ -142,7 +135,7 @@ impl MCP3008 {
             if libc::ioctl(fd, SPI_WR_BITS as _, &b) < 0 {
                 return Err(PyOSError::new_err("SPI bits set failed"));
             }
-            let s = speed_khz * 1000;
+            let s = speed_khz * 1_000;
             if libc::ioctl(fd, SPI_WR_SPEED as _, &s) < 0 {
                 return Err(PyOSError::new_err("SPI speed set failed"));
             }
@@ -173,7 +166,7 @@ impl MCP3008 {
         if ret < 1 {
             return Err(PyOSError::new_err("SPI transfer failed"));
         }
-        Ok((((rx[1] & 0x03) as u16) << 8) | (rx[2] as u16))
+        Ok((((rx[1] & 3) as u16) << 8) | rx[2] as u16)
     }
 
     fn value(&self) -> PyResult<f64> {
@@ -186,7 +179,7 @@ impl MCP3008 {
     }
 }
 
-// RS485 Serial
+// === RS485 Serial ===
 
 fn config_serial(fd: c_int, baud: u32) -> Result<(), String> {
     unsafe {
@@ -235,6 +228,17 @@ impl Serial485 {
         Ok(Serial485 { fd, de_pin })
     }
 
+    fn write(&self, data: &[u8]) -> PyResult<usize> {
+        output(self.de_pin, 1)?;
+        let n = unsafe { write(self.fd, data.as_ptr() as *const _, data.len()) };
+        if n < 0 {
+            return Err(PyOSError::new_err("Serial write failed"));
+        }
+        unsafe { tcdrain(self.fd); }
+        output(self.de_pin, 0)?;
+        Ok(n as usize)
+    }
+
     fn read(&self, size: usize) -> PyResult<Vec<u8>> {
         let mut buf = vec![0u8; size];
         let n = unsafe { read(self.fd, buf.as_mut_ptr() as *mut _, size) };
@@ -243,16 +247,6 @@ impl Serial485 {
             if err == EAGAIN || err == EWOULDBLOCK {
                 return Ok(Vec::new());
             }
-            return Err(PyOSError::new_err("Serial read failed"));
-        }
-        buf.truncate(n as usize);
-        Ok(buf)
-    }
-
-    fn read(&self, size: usize) -> PyResult<Vec<u8>> {
-        let mut buf = vec![0u8; size];
-        let n = unsafe { read(self.fd, buf.as_mut_ptr() as *mut _, size) };
-        if n < 0 {
             return Err(PyOSError::new_err("Serial read failed"));
         }
         buf.truncate(n as usize);
