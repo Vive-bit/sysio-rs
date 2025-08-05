@@ -12,10 +12,12 @@ fn init_gpio() -> PyResult<()> {
         if !GPIO_MEM.is_null() {
             return Ok(());
         }
-        let fd = open(b"/dev/gpiomem".as_ptr(), O_RDWR);
+        // open /dev/gpiomem
+        let fd = open(b"/dev/gpiomem\0".as_ptr() as *const i8, O_RDWR);
         if fd < 0 {
             return Err(PyOSError::new_err("Failed to open /dev/gpiomem"));
         }
+        // mmap GPIO registers
         let map = mmap(
             ptr::null_mut(),
             GPIO_LEN,
@@ -33,14 +35,14 @@ fn init_gpio() -> PyResult<()> {
     }
 }
 
+fn gpio_register(idx: usize) -> *mut u32 {
+    unsafe { GPIO_MEM.add(idx) }
+}
+
 #[pyfunction]
 fn setmode(_mode: &str) -> PyResult<()> {
     init_gpio()?;
     Ok(())
-}
-
-fn gpio_register(idx: usize) -> *mut u32 {
-    unsafe { GPIO_MEM.add(idx) }
 }
 
 #[pyfunction]
@@ -61,7 +63,11 @@ fn setup(pin: u8, direction: &str) -> PyResult<()> {
 #[pyfunction]
 fn output(pin: u8, value: u8) -> PyResult<()> {
     init_gpio()?;
-    let idx = if value == 0 { 10 + (pin as usize) / 32 } else { 7 + (pin as usize) / 32 };
+    let idx = if value == 0 {
+        10 + (pin as usize) / 32
+    } else {
+        7 + (pin as usize) / 32
+    };
     let shift = (pin % 32) as usize;
     unsafe {
         let reg = gpio_register(idx);
