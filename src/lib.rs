@@ -26,12 +26,12 @@ const SPI_IOC_WR_MAX_SPEED_HZ: c_ulong = _ioc(IOC_WRITE, SPI_IOC_MAGIC, 4, std::
 
 static mut PIN_MODE: Option<Mode> = None;
 static BOARD_TO_BCM: [i32; 40] = [
-     2, -1,  3,  4, -1,  0,  1, // 1-7
-    14, -1, 15, 17, 18, 27, -1, // 8-14
-    22, 23, -1, 24, 10,  9, 25,  // 15-21
-    11,  8, -1,  7,  0,  1,  5,  // 22-28
-    -1,  6, 12, 13, -1, 19, 16,  // 29-35
-    26, 20, -1, 21              // 36-40
+     2, -1,  3,  4, -1,  0,  1,
+    14, -1, 15, 17, 18, 27, -1,
+    22, 23, -1, 24, 10,  9, 25,
+    11,  8, -1,  7,  0,  1,  5,
+    -1,  6, 12, 13, -1, 19, 16,
+    26, 20, -1, 21
 ];
 
 enum Mode { BCM, BOARD }
@@ -41,11 +41,11 @@ fn map_pin(pin: u8) -> PyResult<u8> {
         match PIN_MODE {
             Some(Mode::BCM) => Ok(pin),
             Some(Mode::BOARD) => {
-                let idx = pin as usize;
-                if idx == 0 || idx > 40 {
+                let idx = (pin as usize).checked_sub(1).ok_or_else(|| PyOSError::new_err("Board pin out of range"))?;
+                if idx >= BOARD_TO_BCM.len() {
                     return Err(PyOSError::new_err("Board pin out of range"));
                 }
-                let bcm = BOARD_TO_BCM[idx - 1];
+                let bcm = BOARD_TO_BCM[idx];
                 if bcm < 0 {
                     return Err(PyOSError::new_err("Invalid board pin"));
                 }
