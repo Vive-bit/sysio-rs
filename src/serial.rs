@@ -14,7 +14,9 @@ use libc::{
 };
 use crate::gpio::{setup, output};
 
-#[derive(Debug, Clone, Copy, FromPyObject)]
+use pyo3::{prelude::*, FromPyObject, exceptions::PyValueError};
+
+#[derive(Debug, Clone, Copy)]
 pub enum DataBits {
     Five  = 5,
     Six   = 6,
@@ -22,18 +24,65 @@ pub enum DataBits {
     Eight = 8,
 }
 
-#[derive(Debug, Clone, Copy, FromPyObject)]
+impl<'source> FromPyObject<'source> for DataBits {
+    fn extract(obj: &'source PyAny) -> PyResult<Self> {
+        let v: u8 = obj.extract()?;
+        match v {
+            5  => Ok(DataBits::Five),
+            6  => Ok(DataBits::Six),
+            7  => Ok(DataBits::Seven),
+            8  => Ok(DataBits::Eight),
+            _  => Err(PyValueError::new_err("data_bits must be 5,6,7 or 8")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum Parity {
     N, // None
     E, // Even
     O, // Odd
 }
 
-#[derive(Debug, Clone, Copy, FromPyObject)]
+impl<'source> FromPyObject<'source> for Parity {
+    fn extract(obj: &'source PyAny) -> PyResult<Self> {
+        // Entweder als String oder als Int übergeben:
+        if let Ok(s) = obj.extract::<&str>() {
+            match s {
+                "N"|"n" => Ok(Parity::N),
+                "E"|"e" => Ok(Parity::E),
+                "O"|"o" => Ok(Parity::O),
+                _       => Err(PyValueError::new_err("parity must be 'N', 'E' or 'O'")),
+            }
+        } else {
+            let v: u8 = obj.extract()?;
+            match v {
+                0 => Ok(Parity::N),
+                1 => Ok(Parity::E),
+                2 => Ok(Parity::O),
+                _ => Err(PyValueError::new_err("parity must be 0 (N),1 (E) or 2 (O)")),
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum StopBits {
     One = 1,
     Two = 2,
 }
+
+impl<'source> FromPyObject<'source> for StopBits {
+    fn extract(obj: &'source PyAny) -> PyResult<Self> {
+        let v: u8 = obj.extract()?;
+        match v {
+            1 => Ok(StopBits::One),
+            2 => Ok(StopBits::Two),
+            _ => Err(PyValueError::new_err("stop_bits must be 1 or 2")),
+        }
+    }
+}
+
 
 fn config_serial(
     fd: c_int,
