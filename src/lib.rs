@@ -6,6 +6,10 @@ use std::os::raw::c_ulong;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::thread::sleep;
 
+const SPI_IOC_WR_MODE:          c_ulong = _ioc(IOC_WRITE, SPI_IOC_MAGIC, 1, std::mem::size_of::<u8>() as u32) as c_ulong;
+const SPI_IOC_WR_BITS_PER_WORD: c_ulong = _ioc(IOC_WRITE, SPI_IOC_MAGIC, 3, std::mem::size_of::<u8>() as u32) as c_ulong;
+const SPI_IOC_WR_MAX_SPEED_HZ:  c_ulong = _ioc(IOC_WRITE, SPI_IOC_MAGIC, 4, std::mem::size_of::<u32>() as u32) as c_ulong;
+
 static mut PIN_MODE: Option<Mode> = None;
 static BOARD_TO_BCM: [i32; 40] = [
     -1, -1, -1, 2, -1, 3, 4, //  1–7
@@ -155,15 +159,15 @@ impl MCP3008 {
         // mode = 0, bits = 8, max_speed_hz = speed_khz*1000
         unsafe {
             let mode: u8 = 0;
-            if libc::ioctl(fd, libc::SPI_IOC_WR_MODE as c_ulong, &mode) < 0 {
+            if libc::ioctl(fd, SPI_IOC_WR_MODE, &mode) < 0 {
                 return Err(PyOSError::new_err("SPI set mode failed"));
             }
             let bits: u8 = 8;
-            if libc::ioctl(fd, libc::SPI_IOC_WR_BITS_PER_WORD as c_ulong, &bits) < 0 {
+            if libc::ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits) < 0 {
                 return Err(PyOSError::new_err("SPI set bits failed"));
             }
             let speed = speed_khz * 1000;
-            if libc::ioctl(fd, libc::SPI_IOC_WR_MAX_SPEED_HZ as c_ulong, &speed) < 0 {
+            if libc::ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed) < 0 {
                 return Err(PyOSError::new_err("SPI set speed failed"));
             }
         }
