@@ -12,7 +12,7 @@ fn init_gpio() -> PyResult<()> {
         if !GPIO_MEM.is_null() {
             return Ok(());
         }
-        let fd = open(b"/dev/gpiomem\0".as_ptr() as *const i8, O_RDWR);
+        let fd = open(b"/dev/gpiomem".as_ptr(), O_RDWR);
         if fd < 0 {
             return Err(PyOSError::new_err("Failed to open /dev/gpiomem"));
         }
