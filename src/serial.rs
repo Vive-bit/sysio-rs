@@ -121,7 +121,7 @@ impl Serial485 {
             .lock()
             .unwrap();
         if set.insert(de_pin) {
-            GPIO::setup(de_pin, Direction::OUT))?;
+            GPIO::setup(de_pin, Direction::OUT)?;
         }
         GPIO::output(de_pin, 0)?;
 
