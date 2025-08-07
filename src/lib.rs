@@ -8,10 +8,8 @@ use pyo3::prelude::*;
 #[pymodule]
 fn sysio(_py: Python, m: &PyModule) -> PyResult<()> {
     // GPIO
-    m.add_function(wrap_pyfunction!(gpio::setmode, m)?)?;
-    m.add_function(wrap_pyfunction!(gpio::setup, m)?)?;
-    m.add_function(wrap_pyfunction!(gpio::output, m)?)?;
-    m.add_function(wrap_pyfunction!(gpio::input, m)?)?;
+    m.add_class::<gpio::Mode>()?;
+    m.add_class::<gpio::GPIO>()?;
 
     // SPI MCP3008
     m.add_class::<spi::MCP3008>()?;
