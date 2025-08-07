@@ -12,6 +12,7 @@ use pyo3::wrap_pyfunction;
 fn sysio(m: &PyModule) -> PyResult<()> {
     // GPIO
     m.add_class::<gpio::Mode>()?;
+    m.add_class::<gpio::Direction>()?;
     m.add_class::<gpio::GPIO>()?;
 
     // SPI MCP3008
