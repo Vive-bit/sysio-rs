@@ -2,6 +2,7 @@ use pyo3::prelude::*;
 use pyo3::exceptions::PyOSError;
 use std::ptr;
 use pyo3::types::PyType;
+use pyo3::types::{PyType, PyTypeRef};
 use std::sync::{Mutex, OnceLock};
 use libc::{open, mmap, close, PROT_READ, PROT_WRITE, MAP_SHARED, O_RDWR, c_char};
 
@@ -88,7 +89,7 @@ pub struct GPIO;
 impl GPIO {
     #[classattr]
     #[allow(non_snake_case)]
-    fn Mode(py: Python<'_>) -> &PyType {
+    fn Mode(py: Python<'_>) -> PyTypeRef<'_> {
         py.get_type_bound::<Mode>()
      }
 
