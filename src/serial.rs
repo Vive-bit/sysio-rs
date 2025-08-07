@@ -11,7 +11,7 @@ use libc::{
     TCSANOW, VMIN, VTIME, EAGAIN, EWOULDBLOCK,
     CS5, CS6, CS7, CS8, PARENB, PARODD, CSTOPB,
 };
-use crate::gpio::{setup, output};
+use crate::gpio::GPIO;
 
 /// DATA BITS
 #[pyclass]
@@ -112,8 +112,8 @@ impl Serial485 {
         parity: Parity,
         stop_bits: StopBits,
     ) -> PyResult<Self> {
-        setup(de_pin, "OUT")?;
-        output(de_pin, 0)?;
+        GPIO::setup(de_pin, "OUT")?;
+        GPIO::output(de_pin, 0)?;
 
         let cpath = CString::new(path)
             .map_err(|e| PyOSError::new_err(e.to_string()))?;
@@ -129,14 +129,14 @@ impl Serial485 {
     }
 
     pub fn write(&self, data: &[u8]) -> PyResult<usize> {
-        output(self.de_pin, 1)?;
+        GPIO::output(self.de_pin, 1)?;
         let fd = *self.fd.lock().unwrap();
         let n = unsafe { write(fd, data.as_ptr() as *const _, data.len()) };
         if n < 0 {
             return Err(PyOSError::new_err("Serial write failed"));
         }
         unsafe { tcdrain(fd); }
-        output(self.de_pin, 0)?;
+        GPIO::output(self.de_pin, 0)?;
         Ok(n as usize)
     }
 
