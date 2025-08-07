@@ -4,6 +4,8 @@ mod serial;
 mod time;
 
 use pyo3::prelude::{PyModule, PyResult, Python};
+use pyo3::pymodule;
+use pyo3::wrap_pyfunction;
 
 
 #[pymodule]
