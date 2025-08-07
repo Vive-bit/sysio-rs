@@ -9,7 +9,7 @@ use pyo3::wrap_pyfunction;
 
 
 #[pymodule]
-fn sysio(py: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn sysio(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     // GPIO
     m.add_class::<gpio::Mode>()?;
     m.add_class::<gpio::GPIO>()?;
