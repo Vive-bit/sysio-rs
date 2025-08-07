@@ -12,6 +12,13 @@ pub enum Mode {
     BOARD,
 }
 
+#[pyclass]
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum Direction {
+    IN,
+    OUT,
+}
+
 static PIN_MODE: OnceLock<Mutex<Mode>> = OnceLock::new();
 static GPIO_MEM: OnceLock<Mutex<usize>> = OnceLock::new();
 
@@ -93,6 +100,12 @@ impl GPIO {
         py.get_type::<Mode>()
      }
 
+    #[classattr]
+    #[allow(non_snake_case)]
+    fn Direction(py: Python<'_>) -> &PyType {
+        py.get_type::<Direction>()
+    }
+
     #[staticmethod]
     pub fn setmode(mode: Mode) -> PyResult<()> {
         let lock = PIN_MODE.get_or_init(|| Mutex::new(Mode::BCM));
@@ -102,7 +115,7 @@ impl GPIO {
     }
 
     #[staticmethod]
-    pub fn setup(pin: u8, direction: &str) -> PyResult<()> {
+    pub fn setup(pin: u8, direction: Direction) -> PyResult<()> {
         let bcm = map_pin(pin)?;
         let base = init_gpio()?;
         let fsel = (bcm as usize) / 10;
@@ -111,7 +124,10 @@ impl GPIO {
             let reg = gpio_reg(base, fsel);
             let val = ptr::read_volatile(reg);
             let mask = !(0b111 << shift);
-            let bits = if direction == "OUT" { 0b001 } else { 0b000 };
+            let bits = match direction {
+                Direction::OUT => 0b001,
+                Direction::IN  => 0b000,
+            };
             ptr::write_volatile(reg, (val & mask) | (bits << shift));
         }
         Ok(())
