@@ -86,11 +86,11 @@ pub struct GPIO;
 
 #[pymethods]
 impl GPIO {
-    /// `GPIO.Mode` liefert das Mode-Enum
     #[classattr]
-    fn Mode(py: Python) -> &PyType {
-        py.get_type::<Mode>()
-    }
+    #[allow(non_snake_case)]
+    fn Mode(py: Python<'_>) -> &PyType {
+        py.get_type_bound::<Mode>()
+     }
 
     #[staticmethod]
     pub fn setmode(mode: Mode) -> PyResult<()> {
