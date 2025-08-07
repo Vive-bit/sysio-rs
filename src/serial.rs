@@ -2,6 +2,8 @@ use pyo3::prelude::*;
 use pyo3::exceptions::PyOSError;
 use std::ffi::CString;
 use std::sync::Mutex;
+use std::collections::HashSet;
+use std::sync::{Mutex, OnceLock};
 use libc::{
     open, read, write, ioctl,
     tcgetattr, tcsetattr, cfmakeraw, cfsetispeed, cfsetospeed,
@@ -11,7 +13,9 @@ use libc::{
     TCSANOW, VMIN, VTIME, EAGAIN, EWOULDBLOCK,
     CS5, CS6, CS7, CS8, PARENB, PARODD, CSTOPB,
 };
-use crate::gpio::GPIO;
+use crate::gpio::{GPIO, Direction};
+
+static CONFIGURED_PINS: OnceLock<Mutex<HashSet<u8>>> = OnceLock::new();
 
 /// DATA BITS
 #[pyclass]
@@ -110,9 +114,15 @@ impl Serial485 {
         de_pin: u8,
         data_bits: DataBits,
         parity: Parity,
-        stop_bits: StopBits,
+        stop_bits: StopBits
     ) -> PyResult<Self> {
-        GPIO::setup(de_pin, "OUT")?;
+        let mut set = CONFIGURED_PINS
+            .get_or_init(|| Mutex::new(HashSet::new()))
+            .lock()
+            .unwrap();
+        if set.insert(de_pin) {
+            GPIO::setup(de_pin, Direction::OUT))?;
+        }
         GPIO::output(de_pin, 0)?;
 
         let cpath = CString::new(path)
