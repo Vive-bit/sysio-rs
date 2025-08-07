@@ -1,7 +1,6 @@
 use pyo3::prelude::*;
 use pyo3::exceptions::PyOSError;
 use std::ffi::CString;
-use std::sync::Mutex;
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
 use libc::{
