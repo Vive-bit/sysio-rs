@@ -1,11 +1,12 @@
 use pyo3::prelude::*;
 use pyo3::exceptions::PyOSError;
 use std::ptr;
+use pyo3::types::PyType;
 use std::sync::{Mutex, OnceLock};
 use libc::{open, mmap, close, PROT_READ, PROT_WRITE, MAP_SHARED, O_RDWR, c_char};
 
-#[pyclass(eq)]
-#[derive(Copy, Clone, PartialEq)]
+#[pyclass]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub enum Mode {
     BCM,
     BOARD,
