@@ -3,10 +3,11 @@ mod spi;
 mod serial;
 mod time;
 
-use pyo3::prelude::*;
+use pyo3::prelude::{PyModule, PyResult, Python};
+
 
 #[pymodule]
-fn sysio(_py: Python, m: &PyModule) -> PyResult<()> {
+fn sysio(py: Python<'_>, m: &PyModule) -> PyResult<()> {
     // GPIO
     m.add_class::<gpio::Mode>()?;
     m.add_class::<gpio::GPIO>()?;
