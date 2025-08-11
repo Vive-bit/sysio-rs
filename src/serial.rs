@@ -1,8 +1,10 @@
 use pyo3::prelude::*;
 use pyo3::exceptions::PyOSError;
+
 use std::ffi::CString;
-use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
+use std::collections::HashSet;
+
 use libc::{
     open, read, write, ioctl,
     tcgetattr, tcsetattr, cfmakeraw, cfsetispeed, cfsetospeed,
@@ -11,10 +13,12 @@ use libc::{
     B9600, B38400, B115200,
     TCSANOW, VMIN, VTIME, EAGAIN, EWOULDBLOCK,
     CS5, CS6, CS7, CS8, PARENB, PARODD, CSTOPB,
+    CREAD, CLOCAL,
 };
-use crate::gpio::{GPIO, Direction};
 
-static CONFIGURED_PINS: OnceLock<Mutex<HashSet<u8>>> = OnceLock::new();
+use super::gpio::{GPIO, Direction};
+
+static OPEN_PORTS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 /// DATA BITS
 #[pyclass]
@@ -58,6 +62,9 @@ fn config_serial(
         }
         cfmakeraw(&mut tio);
 
+        // RX aktiv + Modem-Wires ignore
+        tio.c_cflag |= CREAD | CLOCAL;
+
         tio.c_cflag &= !libc::CSIZE;
         tio.c_cflag |= match data_bits {
             DataBits::Five  => CS5,
@@ -87,8 +94,10 @@ fn config_serial(
         cfsetispeed(&mut tio, speed);
         cfsetospeed(&mut tio, speed);
 
+        // Timeout clamped (0..255) in 100ms-steps
+        let vtime = (timeout * 10.0).clamp(0.0, 255.0) as u8;
         tio.c_cc[VMIN]  = 0;
-        tio.c_cc[VTIME] = (timeout * 10.0) as u8;
+        tio.c_cc[VTIME] = vtime;
 
         if tcsetattr(fd, TCSANOW, &tio) != 0 {
             return Err("tcsetattr failed".into());
@@ -101,6 +110,7 @@ fn config_serial(
 pub struct Serial485 {
     fd: Mutex<c_int>,
     de_pin: u8,
+    path: String,
 }
 
 #[pymethods]
@@ -115,40 +125,53 @@ impl Serial485 {
         parity: Parity,
         stop_bits: StopBits
     ) -> PyResult<Self> {
-        let mut set = CONFIGURED_PINS
-            .get_or_init(|| Mutex::new(HashSet::new()))
-            .lock()
-            .unwrap();
-        if set.insert(de_pin) {
+        // DE-Pin ensure (idempotent)
+        if !GPIO::is_setup(de_pin, Direction::OUT).unwrap_or(false) {
             GPIO::setup(de_pin, Direction::OUT)?;
         }
         GPIO::output(de_pin, 0)?;
 
+        {
+            let mut ports = OPEN_PORTS.get_or_init(|| Mutex::new(HashSet::new())).lock().unwrap();
+            if !ports.insert(path.clone()) {
+                return Err(PyOSError::new_err(format!("Port '{}' ist bereits geöffnet", path)));
+            }
+        }
+
         // Open device
-        let cpath = CString::new(path)
+        let cpath = CString::new(path.clone())
             .map_err(|e| PyOSError::new_err(e.to_string()))?;
         let raw_fd = unsafe { open(cpath.as_ptr(), O_RDWR | O_NOCTTY | O_NONBLOCK) };
         if raw_fd < 0 {
+            if let Some(lock) = OPEN_PORTS.get() { lock.lock().unwrap().remove(&path); }
             return Err(PyOSError::new_err("Serial open failed"));
         }
 
-        // Params
-        config_serial(raw_fd, baud, timeout, data_bits, parity, stop_bits)
-            .map_err(PyOSError::new_err)?;
+        // Kernel-exclusive (best effort)
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        unsafe { let _ = ioctl(raw_fd, libc::TIOCEXCL, 0); }
 
-        Ok(Serial485 { fd: Mutex::new(raw_fd), de_pin })
+        // Params
+        if let Err(e) = config_serial(raw_fd, baud, timeout, data_bits, parity, stop_bits) {
+            if let Some(lock) = OPEN_PORTS.get() { lock.lock().unwrap().remove(&path); }
+            unsafe { libc::close(raw_fd); }
+            return Err(PyOSError::new_err(e));
+        }
+
+        Ok(Serial485 { fd: Mutex::new(raw_fd), de_pin, path })
     }
 
     /// Fully send
     pub fn write(&self, data: &[u8]) -> PyResult<usize> {
-        let fd_guard = self.fd.lock().unwrap();
-        let fd = *fd_guard;
+        let fd = *self.fd.lock().unwrap();
 
         GPIO::output(self.de_pin, 1)?;
         let mut sent = 0usize;
         while sent < data.len() {
             let n = unsafe { write(fd, data[sent..].as_ptr() as *const _, data.len() - sent) };
             if n < 0 {
+                let err = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+                if err == libc::EINTR { continue; }
                 GPIO::output(self.de_pin, 0)?;
                 return Err(PyOSError::new_err("Serial write failed"));
             }
@@ -159,29 +182,28 @@ impl Serial485 {
         Ok(sent)
     }
 
-    /// Non-blocking Read (VTIME/VMIN controls Blocking-Verhalten)
+    /// Non-blocking Read (VTIME/VMIN controls Blocking)
     pub fn read(&self, size: usize) -> PyResult<Vec<u8>> {
+        let fd = *self.fd.lock().unwrap();
         let mut buf = vec![0u8; size];
-        let fd_guard = self.fd.lock().unwrap();
-        let fd = *fd_guard;
-
-        let n = unsafe { read(fd, buf.as_mut_ptr() as *mut _, size) };
-        if n < 0 {
-            let err = unsafe { *libc::__errno_location() };
-            if err == EAGAIN || err == EWOULDBLOCK {
-                return Ok(Vec::new());
+        loop {
+            let n = unsafe { read(fd, buf.as_mut_ptr() as *mut _, size) };
+            if n < 0 {
+                let err = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+                if err == libc::EINTR { continue; }
+                if err == EAGAIN || err == EWOULDBLOCK {
+                    return Ok(Vec::new());
+                }
+                return Err(PyOSError::new_err("Serial read failed"));
             }
-            return Err(PyOSError::new_err("Serial read failed"));
+            buf.truncate(n as usize);
+            return Ok(buf);
         }
-        buf.truncate(n as usize);
-        Ok(buf)
     }
 
     pub fn in_waiting(&self) -> PyResult<usize> {
         let mut bytes: c_int = 0;
-        let fd_guard = self.fd.lock().unwrap();
-        let fd = *fd_guard;
-
+        let fd = *self.fd.lock().unwrap();
         let rc = unsafe { ioctl(fd, FIONREAD, &mut bytes) };
         if rc < 0 {
             return Err(PyOSError::new_err("ioctl(FIONREAD) failed"));
@@ -190,22 +212,19 @@ impl Serial485 {
     }
 
     pub fn flush(&self) -> PyResult<()> {
-        let fd_guard = self.fd.lock().unwrap();
-        let fd = *fd_guard;
+        let fd = *self.fd.lock().unwrap();
         unsafe { tcdrain(fd); }
         Ok(())
     }
 
     pub fn reset_input_buffer(&self) -> PyResult<()> {
-        let fd_guard = self.fd.lock().unwrap();
-        let fd = *fd_guard;
+        let fd = *self.fd.lock().unwrap();
         unsafe { tcflush(fd, TCIFLUSH); }
         Ok(())
     }
 
     pub fn reset_output_buffer(&self) -> PyResult<()> {
-        let fd_guard = self.fd.lock().unwrap();
-        let fd = *fd_guard;
+        let fd = *self.fd.lock().unwrap();
         unsafe { tcflush(fd, TCOFLUSH); }
         Ok(())
     }
@@ -215,6 +234,9 @@ impl Serial485 {
         if *fd_guard >= 0 {
             unsafe { libc::close(*fd_guard) };
             *fd_guard = -1;
+        }
+        if let Some(lock) = OPEN_PORTS.get() {
+            lock.lock().unwrap().remove(&self.path);
         }
         Ok(())
     }
