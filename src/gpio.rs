@@ -4,6 +4,8 @@ use std::ptr;
 use pyo3::types::PyType;
 use std::sync::{Mutex, OnceLock};
 use libc::{open, mmap, close, PROT_READ, PROT_WRITE, MAP_SHARED, O_RDWR, c_char};
+use std::collections::{HashMap, HashSet};
+
 
 #[pyclass]
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -19,6 +21,7 @@ pub enum Direction {
     OUT,
 }
 
+static PIN_DIRECTIONS: OnceLock<Mutex<HashMap<u8, Direction>>> = OnceLock::new();
 static PIN_MODE: OnceLock<Mutex<Mode>> = OnceLock::new();
 static GPIO_MEM: OnceLock<Mutex<usize>> = OnceLock::new();
 
@@ -30,6 +33,20 @@ const BOARD_TO_BCM: [i8; 41] = [
     -1,  6, 12, 13, -1, 19, 16, 26, 20, -1,
      21,
 ];
+
+fn is_direction_set(base: *mut u32, bcm: u8, want: Direction) -> bool {
+    let fsel = (bcm as usize) / 10;
+    let shift = ((bcm % 10) * 3) as usize;
+    unsafe {
+        let reg = gpio_reg(base, fsel);
+        let val = ptr::read_volatile(reg);
+        let bits = (val >> shift) & 0b111;
+        match want {
+            Direction::IN  => bits == 0b000,
+            Direction::OUT => bits == 0b001,
+        }
+    }
+}
 
 fn init_gpio() -> PyResult<*mut u32> {
     let lock = GPIO_MEM.get_or_init(|| Mutex::new(0));
@@ -115,24 +132,63 @@ impl GPIO {
     }
 
     #[staticmethod]
+    pub fn is_setup(pin: u8, direction: Direction) -> PyResult<bool> {
+        let bcm = map_pin(pin)?;
+        let base = init_gpio()?;
+        let cache = PIN_DIRECTIONS.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap();
+        let cached = cache.get(&bcm).copied();
+        let reg_ok = is_direction_set(base, bcm, direction);
+        Ok(match (cached, reg_ok) {
+            (Some(d), true) if d == direction => true,
+            _ => reg_ok,
+        })
+    }
+    
+    #[staticmethod]
     pub fn setup(pin: u8, direction: Direction) -> PyResult<()> {
         let bcm = map_pin(pin)?;
         let base = init_gpio()?;
+
+        let cache_lock = PIN_DIRECTIONS.get_or_init(|| Mutex::new(HashMap::new()));
+        {
+            let mut cache = cache_lock.lock().unwrap();
+            if let Some(prev) = cache.get(&bcm) {
+                if *prev == direction {
+                    if is_direction_set(base, bcm, direction) {
+                        return Ok(());
+                    }
+                } else {
+                    return Err(PyOSError::new_err(format!(
+                        "GPIO {} bereits als {:?} konfiguriert",
+                        bcm, prev
+                    )));
+                }
+            } else {
+                if is_direction_set(base, bcm, direction) {
+                    cache.insert(bcm, direction);
+                    return Ok(());
+                }
+            }
+        }
+
         let fsel = (bcm as usize) / 10;
         let shift = ((bcm % 10) * 3) as usize;
         unsafe {
             let reg = gpio_reg(base, fsel);
             let val = ptr::read_volatile(reg);
             let mask = !(0b111 << shift);
-            let bits = match direction {
-                Direction::OUT => 0b001,
-                Direction::IN  => 0b000,
-            };
+            let bits = match direction { Direction::OUT => 0b001, Direction::IN => 0b000 };
             ptr::write_volatile(reg, (val & mask) | (bits << shift));
         }
+
+        PIN_DIRECTIONS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock().unwrap()
+            .insert(bcm, direction);
+
         Ok(())
     }
-
+    
     #[staticmethod]
     pub fn output(pin: u8, value: u8) -> PyResult<()> {
         let bcm = map_pin(pin)?;
