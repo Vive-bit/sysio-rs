@@ -1,4 +1,4 @@
-# sysio-rs
+# SysIO-rs
 A native Rust extension for Python providing direct `GPIO, SPI (MCP3008) and RS-485 serial access on Linux`, with no external dependencies beyond `pyo3` and `libc`.
 Currently used for super performance critical components of my py projects.
 
