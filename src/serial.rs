@@ -26,14 +26,6 @@ pub enum DataBits {
     Eight = 8,
 }
 
-#[pymethods]
-impl DataBits {
-    #[classattr] pub const Five:  DataBits = DataBits::Five;
-    #[classattr] pub const Six:   DataBits = DataBits::Six;
-    #[classattr] pub const Seven: DataBits = DataBits::Seven;
-    #[classattr] pub const Eight: DataBits = DataBits::Eight;
-}
-
 /// PARITY
 #[pyclass]
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -43,25 +35,12 @@ pub enum Parity {
     O, // Odd
 }
 
-#[pymethods]
-impl Parity {
-    #[classattr] pub const N: Parity = Parity::N;
-    #[classattr] pub const E: Parity = Parity::E;
-    #[classattr] pub const O: Parity = Parity::O;
-}
-
 /// STOP BITS
 #[pyclass]
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum StopBits {
     One = 1,
     Two = 2,
-}
-
-#[pymethods]
-impl StopBits {
-    #[classattr] pub const One: StopBits = StopBits::One;
-    #[classattr] pub const Two: StopBits = StopBits::Two;
 }
 
 fn config_serial(
