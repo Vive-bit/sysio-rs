@@ -21,87 +21,42 @@ use super::gpio::{GPIO, Direction};
 
 static OPEN_PORTS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
-/// DATA BITS
 #[pyclass]
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum DataBits {
-    Five  = 5,
-    Six   = 6,
-    Seven = 7,
-    Eight = 8,
-}
+pub enum DataBits { Five=5, Six=6, Seven=7, Eight=8 }
 
-/// PARITY
 #[pyclass]
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum Parity {
-    N, // None
-    E, // Even
-    O, // Odd
-}
+pub enum Parity { N, E, O }
 
-/// STOP BITS
 #[pyclass]
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum StopBits {
-    One = 1,
-    Two = 2,
-}
+pub enum StopBits { One=1, Two=2 }
 
 fn config_serial(
-    fd: c_int,
-    baud: u32,
-    timeout: f64,
-    data_bits: DataBits,
-    parity: Parity,
-    stop_bits: StopBits,
+    fd: c_int, baud: u32, timeout: f64,
+    data_bits: DataBits, parity: Parity, stop_bits: StopBits,
 ) -> Result<(), String> {
     unsafe {
         let mut tio: termios = std::mem::zeroed();
-        if tcgetattr(fd, &mut tio) != 0 {
-            return Err("tcgetattr failed".into());
-        }
+        if tcgetattr(fd, &mut tio) != 0 { return Err("tcgetattr failed".into()); }
         cfmakeraw(&mut tio);
-
         tio.c_cflag |= CREAD | CLOCAL;
-
         tio.c_cflag &= !libc::CSIZE;
-        tio.c_cflag |= match data_bits {
-            DataBits::Five  => CS5,
-            DataBits::Six   => CS6,
-            DataBits::Seven => CS7,
-            DataBits::Eight => CS8,
-        };
-
+        tio.c_cflag |= match data_bits { DataBits::Five=>CS5, DataBits::Six=>CS6, DataBits::Seven=>CS7, DataBits::Eight=>CS8 };
         match parity {
             Parity::N => tio.c_cflag &= !PARENB,
-            Parity::E => { tio.c_cflag |= PARENB; tio.c_cflag &= !PARODD; },
-            Parity::O => { tio.c_cflag |= PARENB; tio.c_cflag |= PARODD; },
+            Parity::E => { tio.c_cflag |= PARENB; tio.c_cflag &= !PARODD; }
+            Parity::O => { tio.c_cflag |= PARENB; tio.c_cflag |= PARODD; }
         }
-
-        if let StopBits::Two = stop_bits {
-            tio.c_cflag |= CSTOPB;
-        } else {
-            tio.c_cflag &= !CSTOPB;
-        }
-
-        let speed = match baud {
-            9600   => B9600,
-            38400  => B38400,
-            115200 => B115200,
-            _      => return Err("Unsupported baud".into()),
-        };
+        if let StopBits::Two = stop_bits { tio.c_cflag |= CSTOPB; } else { tio.c_cflag &= !CSTOPB; }
+        let speed = match baud { 9600=>B9600, 38400=>B38400, 115200=>B115200, _=>return Err("Unsupported baud".into()) };
         cfsetispeed(&mut tio, speed);
         cfsetospeed(&mut tio, speed);
-
-        // Timeout clamped (0..255) in 100ms-steps
         let vtime = (timeout * 10.0).clamp(0.0, 255.0) as u8;
         tio.c_cc[VMIN]  = 0;
         tio.c_cc[VTIME] = vtime;
-
-        if tcsetattr(fd, TCSANOW, &tio) != 0 {
-            return Err("tcsetattr failed".into());
-        }
+        if tcsetattr(fd, TCSANOW, &tio) != 0 { return Err("tcsetattr failed".into()); }
     }
     Ok(())
 }
@@ -118,21 +73,14 @@ impl Serial485 {
     #[new]
     pub fn new(
         py: Python<'_>,
-        path: String,
-        baud: u32,
-        timeout: f64,
-        de_pin: u8,
-        data_bits: DataBits,
-        parity: Parity,
-        stop_bits: StopBits
+        path: String, baud: u32, timeout: f64, de_pin: u8,
+        data_bits: DataBits, parity: Parity, stop_bits: StopBits
     ) -> PyResult<Self> {
-        // DE-Pin ensure (idempotent)
         if !GPIO::is_setup(de_pin, Direction::OUT).unwrap_or(false) {
             GPIO::setup(de_pin, Direction::OUT)?;
         }
         GPIO::output(de_pin, 0)?;
 
-        // Process Double-Open-Lock
         {
             let mut ports = OPEN_PORTS.get_or_init(|| Mutex::new(HashSet::new())).lock().unwrap();
             if !ports.insert(path.clone()) {
@@ -140,49 +88,33 @@ impl Serial485 {
             }
         }
 
-        // Open device (GIL free)
-        let raw_fd: c_int = py
-            .allow_threads(|| {
-                let cpath = CString::new(path.clone())
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
-                let fd = unsafe { open(cpath.as_ptr(), O_RDWR | O_NOCTTY | O_NONBLOCK) };
-                if fd < 0 {
-                    return Err(io::Error::last_os_error());
-                }
+        let raw_fd: c_int = py.allow_threads(|| {
+            let cpath = CString::new(path.clone())
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            let fd = unsafe { open(cpath.as_ptr(), O_RDWR | O_NOCTTY | O_NONBLOCK) };
+            if fd < 0 { return Err(io::Error::last_os_error()); }
+            #[cfg(any(target_os="linux", target_os="android"))]
+            unsafe { let _ = ioctl(fd, libc::TIOCEXCL, 0); }
+            Ok(fd)
+        }).map_err(|e: io::Error| {
+            if let Some(lock) = OPEN_PORTS.get() { lock.lock().unwrap().remove(&path); }
+            PyOSError::new_err(format!("Serial open failed: {e}"))
+        })?;
 
-                // Kernel-exklusiv (best effort)
-                #[cfg(any(target_os = "linux", target_os = "android"))]
-                unsafe { let _ = ioctl(fd, libc::TIOCEXCL, 0); }
-
-                Ok(fd)
-            })
-            .map_err(|e: io::Error| {
-                if let Some(lock) = OPEN_PORTS.get() {
-                    lock.lock().unwrap().remove(&path);
-                }
-                PyOSError::new_err(format!("Serial open failed: {e}"))
-            })?;
-
-        // termios config (GIL free)
         py.allow_threads(|| {
             config_serial(raw_fd, baud, timeout, data_bits, parity, stop_bits)
                 .map_err(|m| io::Error::new(io::ErrorKind::Other, m))
-        })
-        .map_err(|e: io::Error| {
-            if let Some(lock) = OPEN_PORTS.get() {
-                lock.lock().unwrap().remove(&path);
-            }
-            unsafe { libc::close(raw_fd) };
+        }).map_err(|e: io::Error| {
+            if let Some(lock) = OPEN_PORTS.get() { lock.lock().unwrap().remove(&path); }
+            unsafe { libc::close(raw_fd); }
             PyOSError::new_err(format!("Serial config failed: {e}"))
         })?;
 
         Ok(Serial485 { fd: Mutex::new(raw_fd), de_pin, path })
     }
 
-    /// Fully send
     pub fn write(&self, py: Python<'_>, data: &[u8]) -> PyResult<usize> {
         let fd = *self.fd.lock().unwrap();
-
         GPIO::output(self.de_pin, 1)?;
         let res: Result<usize, io::Error> = py.allow_threads(|| {
             let mut sent = 0usize;
@@ -190,21 +122,18 @@ impl Serial485 {
                 let n = unsafe { write(fd, data[sent..].as_ptr() as *const _, data.len() - sent) };
                 if n < 0 {
                     let err = io::Error::last_os_error();
-                    if err.raw_os_error() == Some(libc::EINTR) {
-                        continue;
-                    }
+                    if err.raw_os_error() == Some(libc::EINTR) { continue; }
                     return Err(err);
                 }
                 sent += n as usize;
             }
-            unsafe { tcdrain(fd); } // can block
+            unsafe { tcdrain(fd); }
             Ok(sent)
         });
         GPIO::output(self.de_pin, 0)?;
         res.map_err(|_| PyOSError::new_err("Serial write failed"))
     }
 
-    /// Non-blocking Read (VTIME/VMIN controls Blocking)
     pub fn read(&self, py: Python<'_>, size: usize) -> PyResult<Vec<u8>> {
         let fd = *self.fd.lock().unwrap();
         let res: Result<Vec<u8>, io::Error> = py.allow_threads(|| {
@@ -213,11 +142,11 @@ impl Serial485 {
                 let n = unsafe { read(fd, buf.as_mut_ptr() as *mut _, size) };
                 if n < 0 {
                     let err = io::Error::last_os_error();
-                    match err.raw_os_error() {
-                        Some(libc::EINTR) => continue,
-                        Some(EAGAIN) | Some(EWOULDBLOCK) => return Ok(Vec::new()),
-                        _ => return Err(err),
+                    if let Some(code) = err.raw_os_error() {
+                        if code == libc::EINTR { continue; }
+                        if code == libc::EAGAIN || code == libc::EWOULDBLOCK { return Ok(Vec::new()); }
                     }
+                    return Err(err);
                 }
                 buf.truncate(n as usize);
                 return Ok(buf);
@@ -231,43 +160,29 @@ impl Serial485 {
         py.allow_threads(|| {
             let mut bytes: c_int = 0;
             let rc = unsafe { ioctl(fd, FIONREAD, &mut bytes) };
-            if rc < 0 {
-                Err(PyOSError::new_err("ioctl(FIONREAD) failed"))
-            } else {
-                Ok(bytes as usize)
-            }
+            if rc < 0 { Err(PyOSError::new_err("ioctl(FIONREAD) failed")) } else { Ok(bytes as usize) }
         })
     }
 
     pub fn flush(&self, py: Python<'_>) -> PyResult<()> {
         let fd = *self.fd.lock().unwrap();
-        py.allow_threads(|| {
-            unsafe { tcdrain(fd); }
-            Ok(())
-        })
+        py.allow_threads(|| { unsafe { tcdrain(fd); } Ok(()) })
     }
 
     pub fn reset_input_buffer(&self, py: Python<'_>) -> PyResult<()> {
         let fd = *self.fd.lock().unwrap();
-        py.allow_threads(|| {
-            unsafe { tcflush(fd, TCIFLUSH); }
-            Ok(())
-        })
+        py.allow_threads(|| { unsafe { tcflush(fd, TCIFLUSH); } Ok(()) })
     }
 
     pub fn reset_output_buffer(&self, py: Python<'_>) -> PyResult<()> {
         let fd = *self.fd.lock().unwrap();
-        py.allow_threads(|| {
-            unsafe { tcflush(fd, TCOFLUSH); }
-            Ok(())
-        })
+        py.allow_threads(|| { unsafe { tcflush(fd, TCOFLUSH); } Ok(()) })
     }
 
-    pub fn close(&mut self, py: Python<'_>) -> PyResult<()> {
+    pub fn close(&mut self) -> PyResult<()> {
         let mut fd_guard = self.fd.lock().unwrap();
         if *fd_guard >= 0 {
-            let fd = *fd_guard;
-            let _ = py.allow_threads(|| unsafe { libc::close(fd) });
+            unsafe { libc::close(*fd_guard) };
             *fd_guard = -1;
         }
         if let Some(lock) = OPEN_PORTS.get() {
@@ -277,12 +192,12 @@ impl Serial485 {
     }
 
     fn __del__(&mut self) {
-        let _ = self.close(Python::acquire_gil().python());
+        let _ = self.close();
     }
 }
 
 impl Drop for Serial485 {
     fn drop(&mut self) {
-        let _ = self.close(unsafe { Python::assume_gil_acquired() });
+        let _ = self.close();
     }
 }
