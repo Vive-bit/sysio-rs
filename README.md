@@ -20,7 +20,7 @@ Currently used for super performance critical components of my py projects.
 
 ## RS-485 Serial via termios + direction-pin toggling
 
-- Serial485(path: str, baud: int, timeout_s: float, de_pin: int)
+- Serial(path: str, baud: int, timeout_s: float, de_pin: int, ...)
   - .write(data: bytes) `-> int`
   - .read(size: int) `-> bytes`
   - .in_waiting() `-> int`
