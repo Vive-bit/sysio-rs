@@ -2,6 +2,8 @@ mod gpio;
 mod spi;
 mod serial;
 mod time;
+mod decorators;
+mod pywrapper;
 
 use pyo3::prelude::{PyModule, PyResult};
 use pyo3::pymodule;
@@ -30,5 +32,8 @@ fn sysio(m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(time::sleep_ms, m)?)?;
     m.add_function(wrap_pyfunction!(time::sleep_us, m)?)?;
     m.add_function(wrap_pyfunction!(time::time_time, m)?)?;
+
+    // Decorators
+    m.add_function(wrap_pyfunction!(decorators::lru_cache, m)?)?;
     Ok(())
 }
