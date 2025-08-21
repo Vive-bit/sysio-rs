@@ -10,7 +10,6 @@ pub struct LruCacheFactory {
 
 #[pymethods]
 impl LruCacheFactory {
-    #[call]
     fn __call__(&self, py: Python, func: PyObject) -> PyResult<PyObject> {
         let wrapper = PyFunctionWrapper::new(py, func, self.capacity)?;
         Py::new(py, wrapper).map(|w| w.into_py(py))
@@ -21,28 +20,29 @@ impl LruCacheFactory {
     }
 }
 
-/// - `@lru_cache`
-/// - `@lru_cache(maxsize=256)`
-/// - `decorated = lru_cache(maxsize=256)(func)`
+/// Uses:
+/// - @lru_cache
+/// - @lru_cache(maxsize=256)
+/// - decorated = lru_cache(maxsize=256)(func)
 #[pyfunction]
 #[pyo3(signature = (*args, **kwargs))]
-pub fn lru_cache(py: Python, args: &PyTuple, kwargs: Option<&PyDict>) -> PyResult<PyObject> {
-    // Parameter interpreting
-    // 1) args[0] is callable > decoration: lru_cache(func, maxsize=?)
-    // 2) no callable in args > Factory: lru_cache(maxsize=?)
-    let maxsize = match kwargs.and_then(|k| k.get_item("maxsize")) {
-        Some(v) => v.extract::<usize>()?,
-        None => {
-            if args.len() == 1 && !is_callable(args.get_item(0)) {
-                args.get_item(0).extract::<usize>().unwrap_or(128)
-            } else {
-                128
-            }
+pub fn lru_cache(py: Python, args: &Bound<'_, PyTuple>, kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<PyObject> {
+    let maxsize = if let Some(kw) = kwargs {
+        if let Some(v) = kw.get_item("maxsize")? {
+            v.extract::<usize>()?
+        } else if args.len() == 1 && !is_callable(args.get_item(0)?) {
+            args.get_item(0)?.extract::<usize>().unwrap_or(128)
+        } else {
+            128
         }
+    } else if args.len() == 1 && !is_callable(args.get_item(0)?) {
+        args.get_item(0)?.extract::<usize>().unwrap_or(128)
+    } else {
+        128
     };
 
-    if args.len() >= 1 && is_callable(args.get_item(0)) {
-        let func: PyObject = args.get_item(0).into();
+    if args.len() >= 1 && is_callable(args.get_item(0)?) {
+        let func: PyObject = args.get_item(0)?.into();
         let wrapper = PyFunctionWrapper::new(py, func, maxsize)?;
         return Py::new(py, wrapper).map(|w| w.into_py(py));
     }
@@ -50,6 +50,6 @@ pub fn lru_cache(py: Python, args: &PyTuple, kwargs: Option<&PyDict>) -> PyResul
     Py::new(py, LruCacheFactory { capacity: maxsize }).map(|f| f.into_py(py))
 }
 
-fn is_callable(obj: &PyAny) -> bool {
+fn is_callable(obj: &Bound<'_, PyAny>) -> bool {
     obj.is_callable()
 }
