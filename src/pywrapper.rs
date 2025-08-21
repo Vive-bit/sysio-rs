@@ -221,12 +221,12 @@ impl PyFunctionWrapper {
             }
         }
 
-        let result = self.func.bind(py).call(args, kwargs)?;
-
+        let result_bound = self.func.bind(py).call(args, kwargs)?;
+        let result_obj: PyObject = result_bound.into_py(py);
         if let Ok(key) = key_opt {
-            self.cache.lock().unwrap().put(key, result.clone_ref(py), py);
+            self.cache.lock().unwrap().put(key, result_obj.clone_ref(py), py);
         }
-        Ok(result)
+        Ok(result_obj)
     }
 
     fn cache_clear(&self) {
