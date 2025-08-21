@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict, PyString, PyTuple};
+use pyo3::types::{PyBytes, PyDict, PyModule, PyTuple};
 
 type Key = Arc<[u8]>;
 
@@ -65,7 +65,6 @@ impl LruCache {
             return None;
         }
         self.hits += 1;
-
         let val = self.map.get(key).unwrap().value.clone_ref(py);
         self.touch_front(key);
         Some(val)
@@ -73,19 +72,14 @@ impl LruCache {
 
     fn put(&mut self, key: Key, value: PyObject, py: Python) {
         if self.map.contains_key(&key) {
-            {
-                let node = self.map.get_mut(&key).unwrap();
+            if let Some(node) = self.map.get_mut(&key) {
                 node.value = value;
             }
             self.touch_front(&key);
             return;
         }
 
-        let node = Node {
-            value,
-            prev: None,
-            next: None,
-        };
+        let node = Node { value, prev: None, next: None };
         self.map.insert(key.clone(), node);
         self.attach_front(&key);
         self.len += 1;
@@ -141,7 +135,7 @@ impl LruCache {
     fn touch_front(&mut self, key: &Key) {
         if let Some(ref h) = self.head {
             if Arc::ptr_eq(h, key) {
-                return;
+                return; // already MRU
             }
         }
         self.detach(key);
@@ -212,12 +206,12 @@ pub struct PyFunctionWrapper {
 
 #[pymethods]
 impl PyFunctionWrapper {
-    #[call]
+    #[pyo3(signature = (*args, **kwargs))]
     fn __call__(
         &self,
-        py: Python,
-        args: &PyTuple,
-        kwargs: Option<&PyDict>,
+        py: Python<'_>,
+        args: &Bound<'_, PyTuple>,
+        kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<PyObject> {
         let key_opt = self.make_key(py, args, kwargs);
 
@@ -227,18 +221,14 @@ impl PyFunctionWrapper {
             }
         }
 
-        let result = self.func.call(py, args, kwargs)?;
+        let result = self.func.bind(py).call(args, kwargs)?;
 
         if let Ok(key) = key_opt {
-            self.cache
-                .lock()
-                .unwrap()
-                .put(key, result.clone_ref(py), py);
+            self.cache.lock().unwrap().put(key, result.clone_ref(py), py);
         }
         Ok(result)
     }
 
-    /// Cache leeren.
     fn cache_clear(&self) {
         self.cache.lock().unwrap().clear();
     }
@@ -248,55 +238,60 @@ impl PyFunctionWrapper {
         self.cache.lock().unwrap().info()
     }
 
-    /// Einzelnen Eintrag invalidieren: gleiche Signatur wie Funktionsaufruf.
     #[pyo3(signature = (*args, **kwargs))]
-    fn cache_invalidate(&self, py: Python, args: &PyTuple, kwargs: Option<&PyDict>) -> PyResult<bool> {
+    fn cache_invalidate(
+        &self,
+        py: Python<'_>,
+        args: &Bound<'_, PyTuple>,
+        kwargs: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<bool> {
         match self.make_key(py, args, kwargs) {
             Ok(key) => Ok(self.cache.lock().unwrap().remove(&key)),
             Err(_) => Ok(false),
         }
     }
 
-    /// Prüfen, ob ein Eintrag existiert: gleiche Signatur wie Funktionsaufruf.
     #[pyo3(signature = (*args, **kwargs))]
-    fn cache_contains(&self, py: Python, args: &PyTuple, kwargs: Option<&PyDict>) -> PyResult<bool> {
+    fn cache_contains(
+        &self,
+        py: Python<'_>,
+        args: &Bound<'_, PyTuple>,
+        kwargs: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<bool> {
         match self.make_key(py, args, kwargs) {
             Ok(key) => Ok(self.cache.lock().unwrap().contains_key(&key)),
             Err(_) => Ok(false),
         }
     }
 
-    /// Aktuelle maxsize auslesen.
     #[getter]
     fn maxsize(&self) -> usize {
         self.cache.lock().unwrap().capacity
     }
 
-    /// maxsize ändern
     #[setter]
-    fn set_maxsize(&self, py: Python, new_size: usize) {
+    fn set_maxsize(&self, py: Python<'_>, new_size: usize) {
         self.cache.lock().unwrap().set_capacity(new_size, py);
     }
 
-    /// Originale Python-Funktion.
     #[getter]
     fn __wrapped__(&self) -> PyObject {
         self.func.clone()
     }
 
-    fn __repr__(&self, py: Python) -> PyResult<String> {
-        let hits_misses = self.cache.lock().unwrap().info();
-        let func_repr: String = self.func.as_ref(py).repr()?.extract()?;
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        let (h, m, sz, cap) = self.cache.lock().unwrap().info();
+        let func_repr: String = self.func.bind(py).repr()?.extract()?;
         Ok(format!(
             "<fastcache.lru_cache wrapping {} hits={} misses={} size={} maxsize={}>",
-            func_repr, hits_misses.0, hits_misses.1, hits_misses.2, hits_misses.3
+            func_repr, h, m, sz, cap
         ))
     }
 }
 
 impl PyFunctionWrapper {
-    pub fn new(py: Python, func: PyObject, capacity: usize) -> PyResult<Self> {
-        let pickle = pyo3::types::PyModule::import(py, "pickle")?;
+    pub fn new(py: Python<'_>, func: PyObject, capacity: usize) -> PyResult<Self> {
+        let pickle: Bound<'_, PyModule> = PyModule::import_bound(py, "pickle")?;
         let dumps = pickle.getattr("dumps")?.to_object(py);
         let highest: i32 = pickle.getattr("HIGHEST_PROTOCOL")?.extract()?;
         Ok(Self {
@@ -307,11 +302,14 @@ impl PyFunctionWrapper {
         })
     }
 
-    /// Key für (args, kwargs):
-    /// key = pickle.dumps((args, "<KW>", sorted(kwargs.items())))
-    /// Falls Pickle fehlschlägt > Fehler (Aufrufer entscheidet über Fallback).
-    fn make_key(&self, py: Python, args: &PyTuple, kwargs: Option<&PyDict>) -> PyResult<Key> {
-        let mut parts: Vec<PyObject> = Vec::with_capacity(args.len() + 1);
+    /// Key = pickle.dumps((args, "<KW>", sorted_kwargs))
+    fn make_key(
+        &self,
+        py: Python<'_>,
+        args: &Bound<'_, PyTuple>,
+        kwargs: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Key> {
+        let mut parts: Vec<PyObject> = Vec::with_capacity(args.len() + 8);
         for a in args.iter() {
             parts.push(a.to_object(py));
         }
@@ -324,18 +322,18 @@ impl PyFunctionWrapper {
             }
             kv.sort_by(|a, b| a.0.cmp(&b.0));
 
-            parts.push(PyString::new_bound(py, "<KW>").to_object(py));
-            for (k, v) in kv.into_iter() {
-                parts.push(PyString::new_bound(py, &k).to_object(py));
+            parts.push("<<KW>>".into_py(py));
+            for (k, v) in kv {
+                parts.push(k.into_py(py));
                 parts.push(v);
             }
         }
 
-        let key_tuple = PyTuple::new_bound(py, parts);
-        let dumps = self.pickle_dumps.as_ref(py);
-        let dumped = dumps.call1((key_tuple, self.pickle_protocol))?;
-        let bytes = PyBytes::try_from(dumped)?;
-        let vec = bytes.as_bytes().to_vec();
-        Ok(Arc::<[u8]>::from(vec.into_boxed_slice()))
+        let tuple = PyTuple::new_bound(py, parts);
+        let dumps = self.pickle_dumps.bind(py);
+        let dumped_any = dumps.call1((tuple, self.pickle_protocol))?;
+        let dumped_bytes = dumped_any.downcast::<PyBytes>()?;
+        let v = dumped_bytes.as_bytes().to_vec();
+        Ok(Arc::<[u8]>::from(v.into_boxed_slice()))
     }
 }
